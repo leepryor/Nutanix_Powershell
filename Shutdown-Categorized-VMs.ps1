@@ -1,3 +1,11 @@
+  <# 
+  -------------------------------------------------------------------------------------
+  |   Created by Lee Pryor                                                            |
+  |   Objective: List VM's belonging to Prism category and issue a power down command.|
+  |   Twitter: @devwrangler for any questions                                         |
+  ------------------------------------------------------------------------------------- 
+  #>
+
 #Certificate information to call Nutanix Prism API
 add-type @"
 using System.Net;
@@ -18,24 +26,26 @@ public class TrustAllCertsPolicy : ICertificatePolicy {
 # Add Nutanix PoSH Cmdlets
 Add-PsSnapin NutanixCmdletsPSSnapin
 
+# Nutanix cluster and prism information
+$prism = "prism.company.com"
+$cluster = "cluster.company.com"
+
 # Check to see if secure credential file exists. If not, prompts for credentials and creates file.
 $CredPath = "C:\SecureString\SecureCredentials.xml"
-
-# Currently a problem but I need to debug why this throws an error
-<# $CredPathExists = [System.IO.File]::Exists($CredPath)
+$CredPathExists = [System.IO.File]::Exists($CredPath)
 
 if ($CredPathExists -eq $false) {
-  GET-CREDENTIAL –Credential (Get-Credential) | EXPORT-CLIXML "$CredPath"
-} #>
+  Get-Credential | EXPORT-CLIXML "$CredPath"
+}
 
 # Run at the start of each script to import the credentials
 $Credentials = IMPORT-CLIXML "$CredPath"
 $RESTAPIUser = $Credentials.UserName
 $RESTAPIPassword = $Credentials.GetNetworkCredential().Password
 
-# Nutanix Prism REST API Connection information
-$cluster = "prism.redacted.com"
-$Uri = "https://$($cluster):9440/api/nutanix/v3/category/query"
+# Nutanix Cluster and Prism REST API Connection information
+
+$Uri = "https://$($prism):9440/api/nutanix/v3/category/query"
 $Header = @{
 "Authorization" = "Basic "+[System.Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($RESTAPIUser+":"+$RESTAPIPassword ))}
 
@@ -65,12 +75,12 @@ $apicall = Invoke-RestMethod -Method Post -Uri $Uri -Headers $Header -Body $json
 #API call returns a list of objects including VM name, uuid etc. UUID is required for the next phase of shutting down the VM's.
 $results = $apicall.results.kind_reference_list.uuid
 
-# Ensure previous Nutanix Sessions are disconnected
+# Ensure previous Nutanix Sessions are disconnected and connect to cluster via Nutanix PoSH Cmdlets.
 Disconnect-NTNXCluster *
 
-Connect-NTNXCluster -Server "prism.redacted.com" -UserName $RESTAPIUser -Password $(ConvertTo-SecureString $RESTAPIPassword -AsPlainText -Force) -AcceptInvalidSSLCerts -ForcedConnection
+Connect-NTNXCluster -Server $cluster -UserName $RESTAPIUser -Password $(ConvertTo-SecureString $RESTAPIPassword -AsPlainText -Force) -AcceptInvalidSSLCerts -ForcedConnection
 
-
+# Iterate through hashtable to check to see if VM is powered on. If not, power down guest OS.
 foreach ($vmid in $results)
 {
     $vmid = Get-NTNXVM -VmId $vmid
